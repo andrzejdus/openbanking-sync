@@ -9,12 +9,21 @@ then works without a browser until the consent expires.
 
 from __future__ import annotations
 
+import datetime as dt
 import http.server
+import ipaddress
 import socket
+import ssl
 import threading
 import webbrowser
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 CALLBACK_PAGE = b"""<!doctype html>
 <meta charset="utf-8">
@@ -27,6 +36,58 @@ CALLBACK_PAGE = b"""<!doctype html>
 <h1>Consent captured</h1>
 <p>You can close this tab and return to the terminal.</p>
 """
+
+
+def ensure_tls_cert(config_dir: Path) -> tuple[Path, Path]:
+    """Return (cert, key) for the local HTTPS callback, generating them once.
+
+    Enable Banking rejects `http://` redirect URLs on production applications,
+    so the loopback listener has to speak TLS. The certificate is self-signed
+    and reused for its whole lifetime on purpose: the browser trusts it only
+    after the user clicks through the warning once, and regenerating it would
+    make them do that again at every consent renewal.
+    """
+    cert_path = config_dir / "callback-cert.pem"
+    key_path = config_dir / "callback-key.pem"
+    if cert_path.exists() and key_path.exists():
+        return cert_path, key_path
+
+    config_dir.mkdir(parents=True, exist_ok=True)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = dt.datetime.now(dt.timezone.utc)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(days=1))
+        .not_valid_after(now + dt.timedelta(days=3650))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]
+            ),
+            critical=False,
+        )
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    key_path.chmod(0o600)
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    cert_path.chmod(0o600)
+    return cert_path, key_path
 
 
 class _CallbackHandler(http.server.BaseHTTPRequestHandler):
@@ -47,12 +108,18 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         """Silence the default stderr access log."""
 
 
+def is_https(redirect_url: str) -> bool:
+    return urlparse(redirect_url).scheme == "https"
+
+
 def is_local(redirect_url: str) -> bool:
     host = urlparse(redirect_url).hostname
     return host in {"localhost", "127.0.0.1", "::1"}
 
 
-def await_redirect(redirect_url: str, timeout: int = 300) -> dict[str, str]:
+def await_redirect(
+    redirect_url: str, timeout: int = 300, config_dir: Path | None = None
+) -> dict[str, str]:
     """Serve the redirect URL's path locally until the bank redirects to it."""
     parsed = urlparse(redirect_url)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
@@ -66,12 +133,23 @@ def await_redirect(redirect_url: str, timeout: int = 300) -> dict[str, str]:
             f"Free the port, or pass --manual to paste the redirect URL instead."
         ) from exc
 
+    if parsed.scheme == "https":
+        cert_path, key_path = ensure_tls_cert(config_dir or Path.home())
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert_path, key_path)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+
     server.timeout = 1
     deadline = threading.Event()
 
     def serve() -> None:
         while not deadline.is_set() and not _CallbackHandler.result:
-            server.handle_request()
+            try:
+                server.handle_request()
+            except (ssl.SSLError, OSError):
+                # The browser aborts the handshake until the user accepts the
+                # self-signed certificate. Keep waiting rather than giving up.
+                continue
 
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()

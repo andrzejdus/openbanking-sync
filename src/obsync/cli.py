@@ -160,9 +160,18 @@ def cmd_link(args: argparse.Namespace) -> int:
     if use_listener:
         if not args.no_browser:
             link.open_in_browser(auth_url)
+        if link.is_https(redirect_url):
+            print(
+                "The callback uses a self-signed certificate, so the browser will\n"
+                "warn once after the bank redirects. Accept it to finish linking."
+            )
         print(f"Waiting for the redirect to {redirect_url} …")
         try:
-            result = link.await_redirect(redirect_url, timeout=args.timeout)
+            result = link.await_redirect(
+                redirect_url,
+                timeout=args.timeout,
+                config_dir=config_module.config_dir(),
+            )
         except (TimeoutError, RuntimeError) as exc:
             print(str(exc), file=sys.stderr)
             return 1

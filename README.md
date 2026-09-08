@@ -19,7 +19,7 @@ were explicitly linked to it — which is exactly the shape of a personal tool.
 
 ## What still needs a browser
 
-Exactly one thing, and only twice a year: **SCA consent**. PSD2 requires the
+Exactly one thing, and only twice a year per bank: **SCA consent**. PSD2 requires the
 account holder to authenticate at their own bank, and no provider can offer a
 headless first consent. After that the API session works without a browser
 until the consent expires — banks cap this between 90 and 180 days.
@@ -37,9 +37,20 @@ payments.
 
 At <https://enablebanking.com/cp/applications>:
 
+- choose the **Production** environment (a Sandbox application only ever sees
+  mock banks — mBank is not in its ASPSP list at all)
 - name the application (the name is shown to you during bank authorisation)
-- whitelist redirect URL `http://localhost:8788/callback`
+- whitelist redirect URL `https://localhost:8788/callback` — production
+  applications reject `http://`, so the scheme matters
+- production additionally requires a description, a data-protection email, and
+  public privacy and terms URLs; this repo's [PRIVACY.md](PRIVACY.md) and
+  [TERMS.md](TERMS.md) exist for that
 - the browser generates and downloads an RSA private key `<application-id>.pem`
+
+A new production application starts **Inactive**. It activates once you link
+your first account to it ("Activate by linking accounts" in the control panel),
+and from then on only linked accounts are readable. Until it is active, every
+API call returns `403 Application is not active`.
 
 ### 2. Point the CLI at it
 
@@ -62,6 +73,12 @@ uv run obsync link --bank Millennium -c PL
 
 Each opens a browser once. You log in at the bank yourself; no credential ever
 passes through this app.
+
+Because the callback must be HTTPS, the listener serves a self-signed
+certificate generated on first use and kept in `~/.config/openbanking-sync/`.
+Your browser will warn once when the bank redirects back — accept it and the
+link completes. The certificate is deliberately never regenerated, so you only
+have to do that once rather than at every consent renewal.
 
 ### 4. Sync
 

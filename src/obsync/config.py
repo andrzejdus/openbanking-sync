@@ -14,7 +14,7 @@ from pathlib import Path
 APP_NAME = "openbanking-sync"
 
 DEFAULT_API_ORIGIN = "https://api.enablebanking.com"
-DEFAULT_REDIRECT_URL = "http://localhost:8788/callback"
+DEFAULT_REDIRECT_URL = "https://localhost:8788/callback"
 
 
 def config_dir() -> Path:
