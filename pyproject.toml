@@ -1,0 +1,26 @@
+[project]
+name = "openbanking-sync"
+version = "0.1.0"
+description = "Read-only PSD2 account sync (mBank, Millennium) into local SQLite via Enable Banking"
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.32",
+    "pyjwt[crypto]>=2.9",
+]
+
+[project.scripts]
+obsync = "obsync.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/obsync"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

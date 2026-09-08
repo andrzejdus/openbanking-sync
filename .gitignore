@@ -1,0 +1,18 @@
+# Secrets — never commit
+config.json
+*.pem
+*.key
+.env
+
+# Local data
+*.sqlite3
+*.sqlite3-journal
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
