@@ -33,6 +33,19 @@ def _table(rows: list[list[str]], headers: list[str]) -> str:
     return "\n".join(out)
 
 
+def _auth_approaches(aspsp: dict) -> str:
+    """`auth_methods` is a list of objects, not strings, despite the quick-start docs."""
+    approaches = []
+    for method in aspsp.get("auth_methods") or []:
+        if isinstance(method, dict):
+            approach = method.get("approach")
+            if approach and approach not in approaches:
+                approaches.append(approach)
+        elif isinstance(method, str) and method not in approaches:
+            approaches.append(method)
+    return ", ".join(approaches)
+
+
 # -- commands --------------------------------------------------------------
 
 
@@ -88,10 +101,11 @@ def cmd_banks(args: argparse.Namespace) -> int:
                 aspsp.get("country", ""),
                 ", ".join(aspsp.get("psu_types", [])),
                 f"{int(validity) // 86400}d" if validity else "-",
-                ", ".join(aspsp.get("auth_methods", []))[:40],
+                _auth_approaches(aspsp),
+                "beta" if aspsp.get("beta") else "",
             ]
         )
-    print(_table(rows, ["BANK", "CC", "PSU TYPES", "CONSENT", "AUTH METHODS"]))
+    print(_table(rows, ["BANK", "CC", "PSU TYPES", "CONSENT", "AUTH", "FLAGS"]))
     print(f"\n{len(rows)} bank(s)")
     return 0
 
