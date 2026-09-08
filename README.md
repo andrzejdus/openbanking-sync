@@ -52,6 +52,13 @@ your first account to it ("Activate by linking accounts" in the control panel),
 and from then on only linked accounts are readable. Until it is active, every
 API call returns `403 Application is not active`.
 
+That linking step is **per bank, not once**. A bank you have not linked in the
+control panel will still let you authorise successfully — and hand back a
+session with zero accounts. `obsync link` detects that case, explains it, and
+declines to save the useless session. So each bank costs two logins the first
+time: one to whitelist it in the control panel, one for the session this tool
+actually reads through. Renewals afterwards are a single login.
+
 ### 2. Point the CLI at it
 
 ```sh

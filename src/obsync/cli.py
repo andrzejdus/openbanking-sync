@@ -195,6 +195,28 @@ def cmd_link(args: argparse.Namespace) -> int:
             return 1
 
     session = client.create_session(code)
+    accounts = session.get("accounts", [])
+
+    if not accounts:
+        # A restricted-production application can only see accounts that were
+        # whitelisted to it in the control panel. Authorising at the bank
+        # succeeds regardless, and comes back empty — which looks like success
+        # unless we say otherwise. The session is not stored: it would sit in
+        # `obsync status` counting down 180 days while granting nothing.
+        print(
+            f"\nAuthorisation succeeded but returned no accounts.\n\n"
+            f"This application is in restricted production, so it can only read\n"
+            f"accounts that were linked to it in the Enable Banking control panel.\n"
+            f"{aspsp['name']} has not been linked there yet.\n\n"
+            f"Fix: open https://enablebanking.com/cp/applications, use\n"
+            f"'Activate by linking accounts' on this application, pick\n"
+            f"{aspsp['country']} / {aspsp['name']} / {args.psu_type}, and complete the\n"
+            f"bank login. Then run this command again.\n\n"
+            f"The empty session was not saved.",
+            file=sys.stderr,
+        )
+        return 1
+
     conn = db.connect(config_module.db_path())
     db.upsert_session(
         conn,
@@ -204,7 +226,6 @@ def cmd_link(args: argparse.Namespace) -> int:
         psu_type=args.psu_type,
         valid_until=valid_until.isoformat(),
     )
-    accounts = session.get("accounts", [])
     for account in accounts:
         db.upsert_account(
             conn,
