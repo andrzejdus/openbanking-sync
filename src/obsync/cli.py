@@ -465,6 +465,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # `link` prints the authorisation URL and then blocks waiting for the
+    # redirect. Under a pipe, block buffering would hold that URL back until
+    # the wait is already over, so keep stdout line buffered either way.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
