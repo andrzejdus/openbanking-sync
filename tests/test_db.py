@@ -181,3 +181,44 @@ def test_failed_run_does_not_stamp_last_synced_at(conn):
     run_id = db.start_run(conn, "acc-1", "2026-06-01", "2026-09-08")
     db.finish_run(conn, run_id, fetched=3, inserted=3)
     assert conn.execute("SELECT last_synced_at FROM accounts WHERE uid='acc-1'").fetchone()[0]
+
+
+def test_balance_after_transaction_is_stored(conn):
+    tx = booked(entry_reference="REF-bal")
+    tx["balance_after_transaction"] = {"amount": "1234.56", "currency": "PLN"}
+    db.upsert_transactions(conn, "acc-1", [tx])
+    row = conn.execute("SELECT * FROM transactions WHERE tx_id = 'REF-bal'").fetchone()
+    assert row["balance_after"] == "1234.56"
+    assert row["balance_after_currency"] == "PLN"
+
+
+def test_migration_backfills_new_column_from_raw(tmp_path):
+    """A database written before the column existed gains it without a re-sync."""
+    path = tmp_path / "old.sqlite3"
+    old = db.connect(path)
+    old.execute("DROP TABLE transactions")
+    # Recreate the pre-migration shape: no balance_after columns.
+    old.execute(
+        """
+        CREATE TABLE transactions (
+            account_uid TEXT NOT NULL, tx_id TEXT NOT NULL, entry_reference TEXT,
+            status TEXT, booking_date TEXT, value_date TEXT, transaction_date TEXT,
+            amount TEXT, currency TEXT, credit_debit TEXT, counterparty TEXT,
+            counterparty_account TEXT, remittance TEXT, bank_tx_code TEXT,
+            first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, raw TEXT NOT NULL,
+            PRIMARY KEY (account_uid, tx_id))
+        """
+    )
+    raw = json.dumps({"balance_after_transaction": {"amount": "77.00", "currency": "PLN"}})
+    old.execute(
+        "INSERT INTO transactions (account_uid, tx_id, first_seen, last_seen, raw) "
+        "VALUES ('acc-1', 'REF-old', '2026-01-01', '2026-01-01', ?)",
+        (raw,),
+    )
+    old.commit()
+    old.close()
+
+    migrated = db.connect(path)
+    row = migrated.execute("SELECT * FROM transactions WHERE tx_id = 'REF-old'").fetchone()
+    assert row["balance_after"] == "77.00"
+    assert row["balance_after_currency"] == "PLN"

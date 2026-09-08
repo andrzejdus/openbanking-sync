@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     amount         TEXT,
     currency       TEXT,
     credit_debit   TEXT,
+    balance_after  TEXT,
+    balance_after_currency TEXT,
     counterparty   TEXT,
     counterparty_account TEXT,
     remittance     TEXT,
@@ -106,8 +108,40 @@ def connect(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     path.chmod(0o600)
     return conn
+
+
+# Columns added after the first release. `CREATE TABLE IF NOT EXISTS` leaves an
+# existing database untouched, so each one is added here and backfilled out of
+# the `raw` JSON — no re-sync, and no lost history.
+ADDED_COLUMNS = {
+    "balance_after": "TEXT",
+    "balance_after_currency": "TEXT",
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)")}
+    added = [c for c in ADDED_COLUMNS if c not in existing]
+    for column in added:
+        conn.execute(f"ALTER TABLE transactions ADD COLUMN {column} {ADDED_COLUMNS[column]}")
+    if not added:
+        return
+    rows = conn.execute(
+        "SELECT account_uid, tx_id, raw FROM transactions WHERE balance_after IS NULL"
+    ).fetchall()
+    for row in rows:
+        amount, currency = _amount(json.loads(row["raw"]).get("balance_after_transaction"))
+        if amount is None:
+            continue
+        conn.execute(
+            "UPDATE transactions SET balance_after = ?, balance_after_currency = ? "
+            "WHERE account_uid = ? AND tx_id = ?",
+            (amount, currency, row["account_uid"], row["tx_id"]),
+        )
+    conn.commit()
 
 
 # -- parsing helpers -------------------------------------------------------
@@ -307,9 +341,10 @@ def upsert_transactions(
             INSERT INTO transactions
                 (account_uid, tx_id, entry_reference, status, booking_date,
                  value_date, transaction_date, amount, currency, credit_debit,
+                 balance_after, balance_after_currency,
                  counterparty, counterparty_account, remittance, bank_tx_code,
                  first_seen, last_seen, raw)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_uid, tx_id) DO UPDATE SET
                 status = excluded.status,
                 booking_date = COALESCE(excluded.booking_date, transactions.booking_date),
@@ -317,6 +352,9 @@ def upsert_transactions(
                 amount = excluded.amount,
                 currency = excluded.currency,
                 credit_debit = excluded.credit_debit,
+                balance_after = COALESCE(excluded.balance_after, transactions.balance_after),
+                balance_after_currency = COALESCE(
+                    excluded.balance_after_currency, transactions.balance_after_currency),
                 counterparty = COALESCE(excluded.counterparty, transactions.counterparty),
                 remittance = COALESCE(excluded.remittance, transactions.remittance),
                 last_seen = excluded.last_seen,
@@ -333,6 +371,7 @@ def upsert_transactions(
                 amount,
                 currency,
                 tx.get("credit_debit_indicator"),
+                *_amount(tx.get("balance_after_transaction")),
                 _party_name(tx, "creditor", "debtor"),
                 _account_ref(tx.get("creditor_account") or tx.get("debtor_account")),
                 _remittance(tx),
