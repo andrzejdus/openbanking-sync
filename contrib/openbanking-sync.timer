@@ -1,0 +1,13 @@
+[Unit]
+Description=Twice-daily bank account sync
+
+[Timer]
+# PSD2 caps unattended (no-SCA) account access at 4 requests per day per
+# account, and both banks return their full history regardless of date_from,
+# so each run is a full pull. Twice a day stays well inside the limit.
+OnCalendar=*-*-* 07,19:00:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

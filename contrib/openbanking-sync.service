@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync bank accounts into the local openbanking-sync database
+Documentation=https://github.com/andrzejdus/openbanking-sync
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/local/openbanking-sync/.venv/bin/obsync sync
+# Read-only against the banks; the only writes are to the local database.
+PrivateTmp=true
+NoNewPrivileges=true

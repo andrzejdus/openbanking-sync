@@ -131,12 +131,38 @@ uv run pytest
 
 ## Scheduling
 
-Sync is safe to run repeatedly. A user timer is enough:
+Sync is idempotent, so it is safe to run repeatedly. Ready-made units are in
+[`contrib/`](contrib):
 
 ```sh
-systemd-run --user --on-calendar='*-*-* 07,19:00' \
-  --unit=openbanking-sync ~/local/openbanking-sync/.venv/bin/obsync sync
+cp contrib/openbanking-sync.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now openbanking-sync.timer
 ```
 
-Note that it will start failing once a consent expires — `obsync status`
-surfaces that, and re-linking needs you at a browser.
+Twice a day is deliberate. PSD2 caps *unattended* account access — anything not
+accompanied by a fresh SCA — at four requests per day per account, and in
+practice both banks ignore `date_from` and return their whole history on every
+call, so an "incremental" sync costs the same as a full one. Syncing more often
+buys nothing and risks `429`s.
+
+It will start failing once a consent expires — `obsync status` surfaces that,
+and re-linking needs you at a browser.
+
+## What the banks actually return
+
+Written from real data, because the PSD2 spec is a poor guide to any individual
+bank. Both populate `booking_date`, `entry_reference`, amount, currency,
+direction and a description on every row; neither ever sends
+`bank_transaction_code` or `value_date`. Beyond that they are complementary:
+
+| Field | mBank | Bank Millennium |
+| --- | --- | --- |
+| `transaction_date` | all rows | never |
+| `balance_after_transaction` | all rows | never |
+| counterparty name / account | 40% of rows | all rows |
+
+mBank omits the counterparty on card payments, naming the merchant only in the
+description. So `booking_date` is the only date field you can rely on across
+both, and any consumer should treat every other column as optional — reading
+the untouched bank JSON from `raw` when it needs more.

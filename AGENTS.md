@@ -37,6 +37,21 @@ code will depend on.
   entries. Upserts must stay idempotent; `tests/test_db.py` guards this.
 - A failed `sync_run` must not stamp `accounts.last_synced_at`.
 
+## Field coverage differs per bank
+
+Verified against live data (see the table in README). `booking_date`,
+`entry_reference`, amount, currency, direction and description are present for
+both banks; `value_date` and `bank_transaction_code` for neither.
+`transaction_date` and `balance_after_transaction` are mBank-only; mBank omits
+the counterparty on ~60% of rows (card payments) where Millennium always sends
+it. Never assume a column is populated because one bank fills it.
+
+Both banks ignore the `date_from` query parameter and return their full
+history on every call, so an incremental sync is not cheaper than a full one.
+Do not "optimise" the sync window expecting fewer rows — and keep scheduled
+runs infrequent, because PSD2 allows only four unattended accesses per account
+per day.
+
 ## Testing
 
 `uv run pytest`. Tests use fixture data only and touch no network. Anything
